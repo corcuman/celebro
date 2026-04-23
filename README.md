@@ -1,23 +1,18 @@
-# 🎉 CELEBRO
+<div align="center">
 
-<pre>
-  _____ ______ _      ______ ____  _____   ____  
- / ____|  ____| |    |  ____|  _ \|  __ \ / __ \ 
-| |    | |__  | |    | |__  | |_) | |__) | |  | |
-| |    |  __| | |    |  __| |  _ <|  _  /| |  | |
-| |____| |____| |____| |____| |_) | | \ \| |__| |
- \_____|______|______|______|____/|_|  \_\\____/ 
-</pre>
+# 🧠✨ CELEBRO 🎊🧠
 
-> **Un cerebro que CELEBRA tener memoria.** 🧠🎊
+**Memoria persistente, privada y ultrarrápida para cualquier agente IA.**
 
-**CELEBRO** es un sistema de memoria persistente, privada y ultrarrápida para **cualquier agente IA**: Hermes, OpenClaw, LangChain, CrewAI, AutoGPT... o el tuyo propio.
+Hermes · OpenClaw · LangChain · CrewAI · AutoGPT · El tuyo propio
 
 ---
 
+</div>
+
 ## 🚀 ¿Por qué CELEBRO?
 
-| Problema con Mem0/Chroma | Solución CELEBRO |
+| ❌ Problema con Mem0/Chroma | ✅ Solución CELEBRO |
 |---|---|
 | Requiere clave API de OpenAI | 100% local, cero APIs externas |
 | Validaciones caprichosas | Código propio, control absoluto |
@@ -37,7 +32,7 @@ Texto ──► Ollama (nomic-embed-text) ──► Vector (768 dims)
                                        SQLite (texto original)
 ```
 
-**Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea ultrarrápido.
+**🔑 Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea **ultrarrápido**.
 
 ## 📦 Instalación
 
@@ -51,6 +46,7 @@ Texto ──► Ollama (nomic-embed-text) ──► Vector (768 dims)
 git clone https://github.com/corcuman/celebro.git
 cd celebro
 pip install -r requirements.txt
+chmod +x celebro.py
 ```
 
 ## 🎯 Uso
