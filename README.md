@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠✨ CELEBRO 🎊🧠
+<pre>
    ██████╗███████╗██╗     ███████╗██████╗ ██████╗  ██████╗ 
   ██╔════╝██╔════╝██║     ██╔════╝██╔══██╗██╔══██╗██╔═══██╗
   ██║     █████╗  ██║     █████╗  ██████╔╝██████╔╝██║   ██║
@@ -9,6 +9,7 @@
    ╚═════╝╚══════╝╚══════╝╚══════╝╚═════╝ ╚═╝  ╚═╝ ╚═════╝ 
 
         [ memoria persistente para agentes con boca cerrada ]
+</pre>
 
 **Memoria persistente, privada y ultrarrápida para cualquier agente IA.**
 
