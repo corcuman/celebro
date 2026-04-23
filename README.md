@@ -1,13 +1,13 @@
 # 🎉 CELEBRO
 
-```
+<pre>
   _____ ______ _      ______ ____  _____   ____  
  / ____|  ____| |    |  ____|  _ \|  __ \ / __ \ 
 | |    | |__  | |    | |__  | |_) | |__) | |  | |
 | |    |  __| | |    |  __| |  _ <|  _  /| |  | |
 | |____| |____| |____| |____| |_) | | \ \| |__| |
  \_____|______|______|______|____/|_|  \_\\____/ 
-```
+</pre>
 
 > **Un cerebro que CELEBRA tener memoria.** 🧠🎊
 
@@ -19,170 +19,76 @@
 
 | Problema con Mem0/Chroma | Solución CELEBRO |
 |---|---|
-| 🐌 Lento: LLM interno para cada `add()` | ⚡ Solo embeddings: **2-5 segundos** por guardado |
-| 🔒 Requiere claves API externas | 🔓 **100% local**, cero APIs |
-| 📦 Dependencias pesadas (spaCy, etc.) | 🪶 Solo `qdrant-client` + `requests` |
-| 🕳️ Caja negra difícil de auditar | 📖 **~150 líneas**, código legible |
-| 🔄 Bloqueos de base de datos | 🎯 Qdrant local **sin servicios** de fondo |
-
----
+| Requiere clave API de OpenAI | 100% local, cero APIs externas |
+| Validaciones caprichosas | Código propio, control absoluto |
+| `add()` tarda minutos | `add()` tarda 2-5 segundos |
+| 200+ líneas de abstracción | ~150 líneas, auditable |
+| Depende de spaCy, fastembed | Solo `qdrant-client` + `requests` |
 
 ## 🏗️ Arquitectura
 
 ```
-    ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-    │   Agente    │─────▶│   Ollama     │─────▶│   Vector    │
-    │   IA        │      │ nomic-embed  │      │   (Qdrant)  │
-    │             │◀─────│   (768d)     │◀─────│   (cosine)  │
-    └─────────────┘      └──────────────┘      └──────┬──────┘
-                                                       │
-                                              ┌────────▼────────┐
-                                              │    SQLite       │
-                                              │  (texto real)   │
-                                              └─────────────────┘
+Texto ──► Ollama (nomic-embed-text) ──► Vector (768 dims)
+                                              │
+                                              ▼
+                                       Qdrant local (vectores)
+                                              │
+                                              ▼
+                                       SQLite (texto original)
 ```
 
-**Flujo:**
-1. Texto → embedding vía **Ollama** (nomic-embed-text)
-2. Vector → indexado en **Qdrant** local (búsqueda por similitud)
-3. Texto original → guardado en **SQLite** (siempre legible)
+**Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea ultrarrápido.
 
----
+## 📦 Instalación
 
-## ⚡ Instalación Rápida
+### Requisitos
+- Python 3.10+
+- Ollama corriendo localmente (`http://localhost:11434`)
+- Modelo de embeddings: `nomic-embed-text` (pull con `ollama pull nomic-embed-text`)
 
-### 1. Prerrequisitos
-
+### Desde GitHub
 ```bash
-# Instalar Ollama (si no lo tienes)
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Descargar modelo de embeddings
-ollama pull nomic-embed-text
-```
-
-### 2. Instalar CELEBRO
-
-```bash
-git clone https://github.com/jcorcuera/celebro.git
+git clone https://github.com/corcuman/celebro.git
 cd celebro
 pip install -r requirements.txt
-chmod +x celebro.py
 ```
 
-### 3. ¡Probar!
-
-```bash
-./celebro.py guardar "Mi servidor web está en 10.0.0.50" infra
-./celebro.py buscar "¿dónde está el servidor?" 3
-```
-
----
-
-## 📖 Uso
+## 🎯 Uso
 
 ### CLI
-
 ```bash
 # Guardar memoria
-./celebro.py guardar "<texto>" [categoría]
+./celebro.py guardar "El Agente Smith es OSINT en CT102 ParrotOS" homelab
 
-# Buscar por similitud semántica
-./celebro.py buscar "<consulta>" [top_k]
-
-# Listar memorias
-./celebro.py listar [categoría] [límite]
-
-# Contar
-./celebro.py contar
-
-# Borrar por ID
-./celebro.py borrar <uuid>
+# Buscar memorias
+./celebro.py buscar "Agente Smith OSINT" 3
 ```
 
-### Como librería Python
-
+### Librería Python
 ```python
 from celebro import Celebro
 
 cb = Celebro()
 
-# Guardar información
-cb.guardar("El Agente Smith es experto en OSINT", categoria="seguridad")
+# Guardar
+cb.guardar("Usuario prefiere español para comunicaciones", preferencias)
 
-# Recuperar por similitud
-for resultado in cb.buscar("¿Qué hace Smith?", top_k=3):
-    print(f"[{resultado['score']}] {resultado['texto']}")
+# Buscar
+resultados = cb.buscar("idioma del usuario", top_k=3)
+for r in resultados:
+    print(f"[{r['score']:.3f}] {r['texto']}")
 ```
-
----
-
-## 🔧 Configuración
-
-| Variable | Descripción | Default |
-|---|---|---|
-| `OLLAMA_URL` | URL del servidor Ollama | `http://localhost:11434` |
-| `CELEBRO_PATH` | Directorio de datos | `~/.celebro` |
-
-```bash
-export OLLAMA_URL="http://192.168.1.50:11434"
-export CELEBRO_PATH="/mnt/nas/celebro_data"
-```
-
----
 
 ## 🧪 Tests
 
 ```bash
+pip install -r tests/requirements-test.txt
 pytest tests/ -v
 ```
 
----
+## 📄 Licencia
 
-## 🤝 Integración con agentes
-
-### LangChain
-```python
-from langchain.tools import Tool
-from celebro import Celebro
-
-cb = Celebro()
-
-tool = Tool(
-    name="memoria",
-    func=lambda q: str(cb.buscar(q, top_k=3)),
-    description="Busca en la memoria persistente del agente"
-)
-```
-
-### CrewAI
-```python
-from crewai.tools import tool
-from celebro import Celebro
-
-cb = Celebro()
-
-@tool
-def recuerdos(query: str) -> str:
-    """Recupera información de la memoria del agente."""
-    return str(cb.buscar(query, top_k=3))
-```
-
----
-
-## 🎭 Origen del nombre
-
-> **CELEBRO** = **CEREBRO** que **CELEBRA** tener memoria.
-
-Nacido de la frustración con Mem0 en hardware modesto, celebramos cada `add()` que tarda 3 segundos en vez de 10 minutos 🎉
-
----
-
-## 📜 Licencia
-
-MIT License — ver [LICENSE](LICENSE).
-
----
+MIT License - ver [LICENSE](LICENSE)
 
 ## 🙏 Créditos
 
