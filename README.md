@@ -1,14 +1,14 @@
 <div align="center">
 
 <pre>
-   ██████╗███████╗██╗     ███████╗██████╗ ██████╗  ██████╗ 
-  ██╔════╝██╔════╝██║     ██╔════╝██╔══██╗██╔══██╗██╔═══██╗
-  ██║     █████╗  ██║     █████╗  ██████╔╝██████╔╝██║   ██║
-  ██║     ██╔══╝  ██║     ██╔══╝  ██╔══██╗██╔══██╗██║   ██║
-  ╚██████╗███████╗███████╗███████╗██████╔╝██║  ██║╚██████╔╝
-   ╚═════╝╚══════╝╚══════╝╚══════╝╚═════╝ ╚═╝  ╚═╝ ╚═════╝ 
+  ██████╗███████╗██╗     ███████╗██████╗ ██████╗  ██████╗ 
+ ██╔════╝██╔════╝██║     ██╔════╝██╔══██╗██╔══██╗██╔═══██╗
+ ██║     █████╗  ██║     █████╗  ██████╔╝██████╔╝██║   ██║
+ ██║     ██╔══╝  ██║     ██╔══╝  ██╔══██╗██╔══██╗██║   ██║
+ ╚██████╗███████╗███████╗███████╗██████╔╝██║  ██║╚██████╔╝
+  ╚═════╝╚══════╝╚══════╝╚══════╝╚═════╝ ╚═╝  ╚═╝ ╚═════╝ 
 
-        [ memoria persistente para agentes con boca cerrada ]
+       [ memoria persistente para agentes con boca cerrada ]
 </pre>
 
 **Memoria persistente, privada y ultrarrápida para cualquier agente IA.**
@@ -28,6 +28,7 @@ Hermes · OpenClaw · LangChain · CrewAI · AutoGPT · El tuyo propio
 | `add()` tarda minutos | `add()` tarda 2-5 segundos |
 | 200+ líneas de abstracción | ~150 líneas, auditable |
 | Depende de spaCy, fastembed | Solo `qdrant-client` + `requests` |
+| Sin metadatos estructurados | Soporte para `source` y `tags` |
 
 ## 🏗️ Arquitectura
 
@@ -35,33 +36,27 @@ Hermes · OpenClaw · LangChain · CrewAI · AutoGPT · El tuyo propio
 Texto ──► Ollama (nomic-embed-text) ──► Vector (768 dims)
                                               │
                                               ▼
-                                       Qdrant local (vectores)
+                                       Qdrant local (vectores + metadatos)
                                               │
                                               ▼
-                                       SQLite (texto original)
+                                       SQLite (texto + metas + tags)
 ```
 
-**🔑 Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea **ultrarrápido**.
+**🔑 Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea **ultrarrápido**. Ahora incluye almacenamiento persistente de **fuente** y **etiquetas** para un filtrado y organización superior.
 
 ## 🛠️ Stack Tecnológico
 
 CELEBRO no es solo un script; es una orquestación ligera de tres tecnologías fundamentales:
 
-1.  **[Ollama](https://ollama.com/):** El motor de IA. Lo usamos exclusivamente para generar **embeddings** (vectores numéricos que representan el significado del texto).
-    - **Modelo:** `nomic-embed-text` (768 dimensiones). Elegido por su equilibrio entre velocidad y precisión semántica.
-2.  **[Qdrant](https://qdrant.tech/):** El motor de búsqueda vectorial. 
-    - **Modo:** Local Storage. CELEBRO configura Qdrant para persistir los vectores directamente en disco (`~/.celebro/vectores`), permitiendo búsquedas por similitud de coseno ultrarrápidas sin necesidad de un servidor externo.
-3.  **[SQLite](https://sqlite.org/):** La base de datos relacional.
-    - **Propósito:** Qdrant es excelente con vectores, pero SQLite es mejor para manejar el texto original, metadatos (categorías) y fechas. CELEBRO sincroniza ambos mediante un ID único (UUID).
+1.  **[Ollama](https://ollama.com/):** Generación de **embeddings** con el modelo `nomic-embed-text`.
+2.  **[Qdrant](https://qdrant.tech/):** Búsqueda vectorial local con soporte para payload enriquecido (`cat`, `source`, `tags`).
+3.  **[SQLite](https://sqlite.org/):** Base relacional para texto, metadatos estructurados y registro histórico.
 
 ## 📦 Instalación
 
 ### 1. Preparar el entorno (Ollama)
 
-Primero, necesitas tener Ollama instalado y funcionando en tu máquina.
-
 ```bash
-# Descargar el modelo de embeddings (esencial)
 ollama pull nomic-embed-text
 ```
 
@@ -71,47 +66,44 @@ ollama pull nomic-embed-text
 git clone https://github.com/corcuman/celebro.git
 cd celebro
 
-# Crear entorno virtual (recomendado)
+# Crear entorno virtual e instalar dependencias
 python3 -m venv venv
 source venv/bin/activate
-
-# Instalar dependencias
 pip install -r requirements.txt
-
-# Hacer el script ejecutable
 chmod +x celebro.py
 ```
 
-### 3. Variables de Entorno (Opcional)
-
-Si necesitas cambiar las rutas por defecto:
-- `OLLAMA_URL`: URL de tu instancia de Ollama (def: `http://localhost:11434`).
-- `CELEBRO_PATH`: Carpeta donde se guardarán las bases de datos (def: `~/.celebro`).
-
 ## 🎯 Uso
 
-### CLI
-```bash
-# Guardar memoria
-./celebro.py guardar "El Agente Smith es OSINT en CT102 ParrotOS" homelab
+### CLI (Mejorado)
 
-# Buscar memorias
-./celebro.py buscar "Agente Smith OSINT" 3
+```bash
+# Guardar memoria con categoría, fuente y tags (formato JSON)
+./celebro.py guardar "Agente Smith es OSINT" homelab terminal '["seguridad", "verificado"]'
+
+# Buscar memorias (muestra score y metadatos)
+./celebro.py buscar "Agente Smith" 3
 ```
 
 ### Librería Python
+
 ```python
 from celebro import Celebro
 
 cb = Celebro()
 
-# Guardar
-cb.guardar("Usuario prefiere español para comunicaciones", preferencias)
+# Guardar con metadatos opcionales
+cb.guardar(
+    texto="Usuario prefiere español", 
+    categoria="preferencias", 
+    source="chat_telegram", 
+    tags=["idioma", "personal"]
+)
 
-# Buscar
+# Buscar (devuelve diccionario con texto, score, source y tags)
 resultados = cb.buscar("idioma del usuario", top_k=3)
 for r in resultados:
-    print(f"[{r['score']:.3f}] {r['texto']}")
+    print(f"[{r['score']:.3f}] Source: {r['source']} | Tags: {r['tags']} | {r['texto']}")
 ```
 
 ## 🧪 Tests
