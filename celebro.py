@@ -1,55 +1,29 @@
-#!/usr/bin/env python3
+#!/usr/bin/env /home/jcorcuera/cerebro_env/bin/python
 """
- ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
- ▓                                                                              ▓
- ▓   ▐█████░  ▐█████░ ▐██░     ▐██████░ ▐███████░ ▐██████░  ▐█████░  ▓
- ▓  ▐█░      ▐█░     ▐█░     ▐█░▀▀▀▀░ ▐█░▀▀▀▀░ ▐█░▀▀▀▀░ ▐█░   █░  ▓
- ▓  ▐█░      ▐█████░ ▐█░     ▐█████░  ▐█████░  ▐█████░ ▐███████░  ▓
- ▓  ▐█░      ▐█░     ▐█░     ▐█░▀▀▀▀░ ▐█░▀▀▀░  ▐█░▀▀░  ▐█░   █░  ▓
- ▓   ▐█████░ ▐██████░▐██████░ ▐██████░ ▐█░     ▐█░  ▐█░ ▐█░   █░  ▓
- ▓                                                                              ▓
- ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-
-CELEBRO - Memoria persistente, privada y ultrarrápida para agentes IA.
-
-Un cerebro que CELEBRA tener memoria 🎉
-
-Embeddings vía Ollama + Qdrant local + SQLite.
-Sin generación LLM = 2-5 segundos por operación, no minutos.
-
-Repo: https://github.com/jcorcuera/celebro
-Autor: @jcorcuera + NeoIA
+CEREBRO - Sistema de memoria persistente propio.
+Embeddings via Ollama (nomic-embed-text) + Qdrant local + SQLite.
+Versión mejorada con metadatos (source, tags).
 """
-
 import os
 import sys
 import json
 import sqlite3
-import uuid
 import requests
+import uuid
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
-# --- Configuración ---
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DB_PATH = os.environ.get("CELEBRO_PATH", os.path.expanduser("~/.celebro"))
+DB_PATH = "/home/jcorcuera/cerebro_data"
 COLLECTION = "memorias"
-EMBEDDING_DIMS = 768
-DEFAULT_MODEL = "nomic-embed-text:latest"
+DIM = 768
 
-
-class Celebro:
-    """CELEBRO: memoria vectorial local con Ollama + Qdrant + SQLite."""
-
-    def __init__(self, ollama_url: str = None, db_path: str = None):
-        self.ollama_url = ollama_url or OLLAMA_URL
-        self.db_path = db_path or DB_PATH
-        os.makedirs(self.db_path, exist_ok=True)
-
-        self.qdrant = QdrantClient(path=f"{self.db_path}/vectores")
+class Cerebro:
+    def __init__(self):
+        os.makedirs(DB_PATH, exist_ok=True)
+        self.qdrant = QdrantClient(path=f"{DB_PATH}/vectores")
         self._ensure_collection()
-
-        self.sql = sqlite3.connect(f"{self.db_path}/textos.db")
+        self.sql = sqlite3.connect(f"{DB_PATH}/textos.db")
         self._ensure_sql_table()
 
     def _ensure_collection(self):
@@ -57,52 +31,67 @@ class Celebro:
         if COLLECTION not in collections:
             self.qdrant.create_collection(
                 collection_name=COLLECTION,
-                vectors_config=VectorParams(size=EMBEDDING_DIMS, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=DIM, distance=Distance.COSINE)
             )
+            print(f"[✅] Colección '{COLLECTION}' creada")
 
     def _ensure_sql_table(self):
         self.sql.execute("""
             CREATE TABLE IF NOT EXISTS textos (
                 id TEXT PRIMARY KEY,
                 texto TEXT NOT NULL,
-                categoria TEXT DEFAULT 'general',
+                categoria TEXT,
+                source TEXT,
+                tags TEXT,
                 fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         self.sql.commit()
 
-    def embed(self, texto: str, model: str = None) -> list:
-        """Genera embedding vía Ollama."""
+    def _embed(self, texto: str) -> list:
         r = requests.post(
-            f"{self.ollama_url}/api/embeddings",
-            json={"model": model or DEFAULT_MODEL, "prompt": texto},
+            f"{OLLAMA_URL}/api/embeddings",
+            json={"model": "nomic-embed-text:latest", "prompt": texto},
             timeout=60
         )
         r.raise_for_status()
         return r.json()["embedding"]
 
-    def guardar(self, texto: str, categoria: str = "general", model: str = None) -> str:
-        """Guarda una memoria. Retorna el ID generado."""
-        mid = str(uuid.uuid4())
-        vector = self.embed(texto, model)
+    def _id(self, texto: str) -> str:
+        return str(uuid.uuid4())
 
-        # Qdrant
+    def guardar(self, texto: str, categoria: str = "general", source: str = None, tags: list = None) -> str:
+        mid = self._id(texto)
+        vector = self._embed(texto)
+        tag_str = json.dumps(tags) if tags else None
+
+        # Qdrant (Base Vectorial)
         self.qdrant.upsert(
             collection_name=COLLECTION,
-            points=[PointStruct(id=mid, vector=vector, payload={"cat": categoria})]
+            points=[PointStruct(
+                id=mid, 
+                vector=vector, 
+                payload={"cat": categoria, "source": source, "tags": tag_str}
+            )]
         )
 
-        # SQLite
-        self.sql.execute(
-            "INSERT INTO textos (id, texto, categoria) VALUES (?, ?, ?)",
-            (mid, texto, categoria)
-        )
-        self.sql.commit()
+        # SQLite (Base Relacional para búsqueda y metadatos)
+        try:
+            self.sql.execute(
+                "INSERT OR REPLACE INTO textos (id, texto, categoria, source, tags) VALUES (?, ?, ?, ?, ?)",
+                (mid, texto, categoria, source, tag_str)
+            )
+            self.sql.commit()
+        except Exception as e:
+            print(f"[⚠️] SQLite warning: {e}")
+
         return mid
 
-    def buscar(self, query: str, top_k: int = 5, model: str = None) -> list:
-        """Búsqueda semántica. Retorna lista de dicts."""
-        vector = self.embed(query, model)
+    def buscar(self, query: str, top_k: int = 5, source: str = None, tags: list = None) -> list:
+        vector = self._embed(query)
+        
+        # Por ahora la búsqueda en Qdrant es solo semántica. 
+        # Los filtros (source, tags) se podrían implementar aquí con un objeto Filter.
         results = self.qdrant.query_points(
             collection_name=COLLECTION,
             query=vector,
@@ -111,125 +100,80 @@ class Celebro:
 
         out = []
         for r in results:
-            cursor = self.sql.execute(
-                "SELECT texto, categoria FROM textos WHERE id = ?", (r.id,)
-            )
+            cursor = self.sql.execute("SELECT texto, source, tags FROM textos WHERE id = ?", (r.id,))
             row = cursor.fetchone()
             if row:
+                texto, source_val, tags_val = row
+                tags_list = json.loads(tags_val) if tags_val else []
                 out.append({
                     "id": r.id,
                     "score": round(r.score, 4),
-                    "texto": row[0],
-                    "categoria": row[1]
+                    "texto": texto,
+                    "categoria": r.payload.get("cat", "general"),
+                    "source": source_val,
+                    "tags": tags_list
                 })
         return out
 
-    def borrar(self, mem_id: str) -> bool:
-        """Borra una memoria por ID."""
-        self.qdrant.delete(collection_name=COLLECTION, points_selector=[mem_id])
-        self.sql.execute("DELETE FROM textos WHERE id = ?", (mem_id,))
-        self.sql.commit()
-        return True
-
     def contar(self) -> int:
-        """Cuenta memorias totales."""
         return self.qdrant.count(collection_name=COLLECTION).count
-
-    def listar(self, categoria: str = None, limite: int = 100) -> list:
-        """Lista memorias (opcionalmente filtradas por categoría)."""
-        if categoria:
-            cursor = self.sql.execute(
-                "SELECT id, texto, categoria, fecha FROM textos WHERE categoria = ? LIMIT ?",
-                (categoria, limite)
-            )
-        else:
-            cursor = self.sql.execute(
-                "SELECT id, texto, categoria, fecha FROM textos LIMIT ?", (limite,)
-            )
-        return [
-            {"id": row[0], "texto": row[1], "categoria": row[2], "fecha": row[3]}
-            for row in cursor.fetchall()
-        ]
-
-
-def print_banner():
-    print(r"""
-  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-  ▓                                                                        ▓
-  ▓   ▐█████░  ▐█████░ ▐██░     ▐██████░ ▐███████░ ▐██████░  ▐█████░  ▓
-  ▓  ▐█░      ▐█░     ▐█░     ▐█░▀▀▀▀░ ▐█░▀▀▀▀░ ▐█░▀▀▀▀░ ▐█░   █░  ▓
-  ▓  ▐█░      ▐█████░ ▐█░     ▐█████░  ▐█████░  ▐█████░ ▐███████░  ▓
-  ▓  ▐█░      ▐█░     ▐█░     ▐█░▀▀▀▀░ ▐█░▀▀▀░  ▐█░▀▀░  ▐█░   █░  ▓
-  ▓   ▐█████░ ▐██████░▐██████░ ▐██████░ ▐█░     ▐█░  ▐█░ ▐█░   █░  ▓
-  ▓                                                                        ▓
-  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-    """)
 
 
 def main():
-    celebro = Celebro()
+    cerebro = Cerebro()
 
     if len(sys.argv) < 2:
-        print_banner()
-        print("Uso: celebro.py <comando> [args...]")
-        print()
+        print("Uso: cerebro.py <comando> [args]")
+        print("")
         print("COMANDOS:")
-        print("  guardar '<texto>' [categoria]     Guarda una memoria")
-        print("  buscar '<query>' [top_k]          Busca por similitud semántica")
-        print("  listar [categoria] [limite]       Lista memorias almacenadas")
-        print("  contar                            Total de memorias")
-        print("  borrar <id>                       Borra una memoria por ID")
-        print()
+        print("  guardar '<texto>' [categoria] [source] [tags_json]  - Guarda una memoria")
+        print("  buscar '<query>' [top_k] [source] [tags_json]       - Busca memorias")
+        print("  contar                                              - Cuenta memorias")
+        print("")
         print("EJEMPLOS:")
-        print('  ./celebro.py guardar "Servidor web en 192.168.1.10" infra')
-        print('  ./celebro.py buscar "¿dónde está el servidor?" 3')
+        print('  ./cerebro.py guardar "Memoria de prueba con metadatos" "test" "terminal" \'["final", "v2"]\'')
+        print('  ./cerebro.py buscar "Prueba final de Cerebro" 2')
         sys.exit(1)
 
     cmd = sys.argv[1]
 
     if cmd == "guardar":
         if len(sys.argv) < 3:
-            print("❌ Falta texto. Uso: guardar '<texto>' [categoria]")
+            print("❌ Falta texto. Uso: guardar '<texto>' [categoria] [source] [tags_json]")
             sys.exit(1)
         texto = sys.argv[2]
         cat = sys.argv[3] if len(sys.argv) > 3 else "general"
-        mid = celebro.guardar(texto, cat)
-        print(f"✅ Guardado [id={mid}] cat={cat}")
+        source = sys.argv[4] if len(sys.argv) > 4 else None
+        tags_str = sys.argv[5] if len(sys.argv) > 5 else None
+        tags = json.loads(tags_str) if tags_str else None
+        
+        mid = cerebro.guardar(texto, cat, source=source, tags=tags)
+        print(f"✅ Guardado [id={mid}] cat={cat}, source={source}, tags={tags}")
         print(f"   {texto[:80]}...")
 
     elif cmd == "buscar":
         if len(sys.argv) < 3:
-            print("❌ Falta query. Uso: buscar '<query>' [top_k]")
+            print("❌ Falta query. Uso: buscar '<query>' [top_k] [source] [tags_json]")
             sys.exit(1)
         query = sys.argv[2]
         top_k = int(sys.argv[3]) if len(sys.argv) > 3 else 5
-        print(f"🔍 Buscando: '{query}' (top {top_k})\n")
-        results = celebro.buscar(query, top_k)
+        source = sys.argv[4] if len(sys.argv) > 4 else None
+        tags_str = sys.argv[5] if len(sys.argv) > 5 else None
+        tags = json.loads(tags_str) if tags_str else None
+
+        print(f"🔍 Buscando: '{query}' (top {top_k}, source={source}, tags={tags})\n")
+        results = cerebro.buscar(query, top_k, source=source, tags=tags)
         if not results:
             print("❌ No se encontraron memorias.")
             sys.exit(0)
         for i, r in enumerate(results, 1):
-            print(f"{i}. [⭐ {r['score']}] [{r['categoria']}] {r['texto'][:120]}...")
-
-    elif cmd == "listar":
-        cat = sys.argv[2] if len(sys.argv) > 2 else None
-        limite = int(sys.argv[3]) if len(sys.argv) > 3 else 100
-        results = celebro.listar(cat, limite)
-        print(f"📊 {len(results)} memorias:\n")
-        for r in results:
-            cat_str = f"[{r['categoria']}] " if r['categoria'] else ""
-            print(f"  {r['id'][:8]}... {cat_str}{r['texto'][:80]}...")
+            tag_display = ", ".join(r['tags']) if r.get('tags') else 'Ninguno'
+            source_display = r.get('source', 'N/A')
+            print(f"{i}. [⭐ {r['score']}] [{r['categoria']}] (Src: {source_display}, Tags: {tag_display}) {r['texto'][:120]}...")
 
     elif cmd == "contar":
-        n = celebro.contar()
+        n = cerebro.contar()
         print(f"📊 Total memorias: {n}")
-
-    elif cmd == "borrar":
-        if len(sys.argv) < 3:
-            print("❌ Falta ID. Uso: borrar <id>")
-            sys.exit(1)
-        celebro.borrar(sys.argv[2])
-        print("🗑️ Memoria borrada.")
 
     else:
         print(f"❌ Comando desconocido: {cmd}")
