@@ -2,7 +2,7 @@
 """
 CEREBRO - Sistema de memoria persistente propio.
 Embeddings via Ollama (nomic-embed-text) + Qdrant local + SQLite.
-Versión mejorada con metadatos (source, tags).
+Versión mejorada con metadatos y sistema de relaciones.
 """
 import os
 import sys
@@ -46,6 +46,18 @@ class Cerebro:
                 fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Fase 2: Tabla de relaciones
+        self.sql.execute("""
+            CREATE TABLE IF NOT EXISTS relationships (
+                relation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_src TEXT NOT NULL,
+                type TEXT NOT NULL,
+                id_dst TEXT NOT NULL,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (id_src) REFERENCES textos(id),
+                FOREIGN KEY (id_dst) REFERENCES textos(id)
+            )
+        """)
         self.sql.commit()
 
     def _embed(self, texto: str) -> list:
@@ -83,15 +95,66 @@ class Cerebro:
             )
             self.sql.commit()
         except Exception as e:
-            print(f"[⚠️] SQLite warning: {e}")
+            print(f"[⚠️] SQLite error al guardar: {e}")
 
         return mid
+
+    def add_relation(self, id_src: str, relation_type: str, id_dst: str) -> bool:
+        # Validar existencia de ambos IDs
+        cursor = self.sql.execute("SELECT id FROM textos WHERE id IN (?, ?)", (id_src, id_dst))
+        found = [row[0] for row in cursor.fetchall()]
+        
+        if id_src not in found:
+            print(f"❌ Error: El ID de origen {id_src} no existe.")
+            return False
+        if id_dst not in found:
+            print(f"❌ Error: El ID de destino {id_dst} no existe.")
+            return False
+            
+        try:
+            self.sql.execute(
+                "INSERT INTO relationships (id_src, type, id_dst) VALUES (?, ?, ?)",
+                (id_src, relation_type, id_dst)
+            )
+            self.sql.commit()
+            return True
+        except Exception as e:
+            print(f"⚠️ Error al crear relación: {e}")
+            return False
+
+    def get_relations(self, memory_id: str) -> list:
+        # Relaciones salientes (outbound) y entrantes (inbound)
+        # Salientes: memory_id -> destino
+        # Entrantes: origen -> memory_id
+        
+        query = """
+            SELECT r.type, r.id_dst as target_id, t.texto as target_texto, 'out' as direction, r.fecha
+            FROM relationships r
+            JOIN textos t ON r.id_dst = t.id
+            WHERE r.id_src = ?
+            UNION ALL
+            SELECT r.type, r.id_src as target_id, t.texto as target_texto, 'in' as direction, r.fecha
+            FROM relationships r
+            JOIN textos t ON r.id_src = t.id
+            WHERE r.id_dst = ?
+        """
+        cursor = self.sql.execute(query, (memory_id, memory_id))
+        rows = cursor.fetchall()
+        
+        return [
+            {
+                "type": r[0],
+                "target_id": r[1],
+                "target_texto": r[2],
+                "direction": r[3],
+                "fecha": r[4]
+            }
+            for r in rows
+        ]
 
     def buscar(self, query: str, top_k: int = 5, source: str = None, tags: list = None) -> list:
         vector = self._embed(query)
         
-        # Por ahora la búsqueda en Qdrant es solo semántica. 
-        # Los filtros (source, tags) se podrían implementar aquí con un objeto Filter.
         filters = None
         if source or tags:
             must_conditions = []
@@ -103,6 +166,12 @@ class Cerebro:
             if must_conditions:
                 filters = Filter(must=must_conditions)
         
+        results = self.qdrant.search(
+            collection_name=COLLECTION,
+            query_vector=vector,
+            limit=top_k,
+            query_filter=filters
+        )
 
         out = []
         for r in results:
@@ -132,20 +201,18 @@ def main():
         print("Uso: cerebro.py <comando> [args]")
         print("")
         print("COMANDOS:")
-        print("  guardar '<texto>' [categoria] [source] [tags_json]  - Guarda una memoria")
-        print("  buscar '<query>' [top_k] [source] [tags_json]       - Busca memorias")
-        print("  contar                                              - Cuenta memorias")
-        print("")
-        print("EJEMPLOS:")
-        print('  ./cerebro.py guardar "Memoria de prueba con metadatos" "test" "terminal" \'["final", "v2"]\'')
-        print('  ./cerebro.py buscar "Prueba final de Cerebro" 2')
+        print("  guardar '<texto>' [cat] [src] [tags_json]  - Guarda una memoria")
+        print("  buscar '<query>' [top_k] [src] [tags_json] - Busca memorias")
+        print("  relacionar <id_src> <tipo> <id_dst>        - Crea una relación entre memorias")
+        print("  relaciones <id>                           - Lista relaciones de una memoria")
+        print("  contar                                     - Cuenta memorias")
         sys.exit(1)
 
     cmd = sys.argv[1]
 
     if cmd == "guardar":
         if len(sys.argv) < 3:
-            print("❌ Falta texto. Uso: guardar '<texto>' [categoria] [source] [tags_json]")
+            print("❌ Falta texto.")
             sys.exit(1)
         texto = sys.argv[2]
         cat = sys.argv[3] if len(sys.argv) > 3 else "general"
@@ -154,12 +221,11 @@ def main():
         tags = json.loads(tags_str) if tags_str else None
         
         mid = cerebro.guardar(texto, cat, source=source, tags=tags)
-        print(f"✅ Guardado [id={mid}] cat={cat}, source={source}, tags={tags}")
-        print(f"   {texto[:80]}...")
+        print(f"✅ Guardado [id={mid}]")
 
     elif cmd == "buscar":
         if len(sys.argv) < 3:
-            print("❌ Falta query. Uso: buscar '<query>' [top_k] [source] [tags_json]")
+            print("❌ Falta query.")
             sys.exit(1)
         query = sys.argv[2]
         top_k = int(sys.argv[3]) if len(sys.argv) > 3 else 5
@@ -167,23 +233,35 @@ def main():
         tags_str = sys.argv[5] if len(sys.argv) > 5 else None
         tags = json.loads(tags_str) if tags_str else None
 
-        print(f"🔍 Buscando: '{query}' (top {top_k}, source={source}, tags={tags})\n")
         results = cerebro.buscar(query, top_k, source=source, tags=tags)
-        if not results:
-            print("❌ No se encontraron memorias.")
-            sys.exit(0)
         for i, r in enumerate(results, 1):
-            tag_display = ", ".join(r['tags']) if r.get('tags') else 'Ninguno'
-            source_display = r.get('source', 'N/A')
-            print(f"{i}. [⭐ {r['score']}] [{r['categoria']}] (Src: {source_display}, Tags: {tag_display}) {r['texto'][:120]}...")
+            print(f"{i}. [{r['id']}] [{r['score']}] {r['texto'][:100]}...")
+
+    elif cmd == "relacionar":
+        if len(sys.argv) < 4:
+            print("❌ Uso: relacionar <id_src> <tipo> <id_dst>")
+            sys.exit(1)
+        if cerebro.add_relation(sys.argv[2], sys.argv[3], sys.argv[4]):
+            print(f"✅ Relación '{sys.argv[3]}' creada.")
+
+    elif cmd == "relaciones":
+        if len(sys.argv) < 3:
+            print("❌ Uso: relaciones <id>")
+            sys.exit(1)
+        rels = cerebro.get_relations(sys.argv[2])
+        if not rels:
+            print("No se encontraron relaciones.")
+        else:
+            for r in rels:
+                arrow = "->" if r['direction'] == 'out' else "<-"
+                print(f"[{r['direction']}] {sys.argv[2]} {arrow} ({r['type']}) {arrow} {r['target_id']}")
+                print(f"      Texto: {r['target_texto'][:80]}...")
 
     elif cmd == "contar":
-        n = cerebro.contar()
-        print(f"📊 Total memorias: {n}")
+        print(f"📊 Total: {cerebro.contar()}")
 
     else:
         print(f"❌ Comando desconocido: {cmd}")
-        sys.exit(1)
 
 
 if __name__ == "__main__":
