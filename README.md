@@ -11,7 +11,7 @@
        [ memoria persistente para agentes con boca cerrada ]
 </pre>
 
-**Memoria persistente, privada y ultrarrápida para cualquier agente IA.**
+**Memoria persistente, relacional, privada y ultrarrápida para cualquier agente IA.**
 
 Hermes · OpenClaw · LangChain · CrewAI · AutoGPT · El tuyo propio
 
@@ -29,60 +29,41 @@ Hermes · OpenClaw · LangChain · CrewAI · AutoGPT · El tuyo propio
 | 200+ líneas de abstracción | ~150 líneas, auditable |
 | Depende de spaCy, fastembed | Solo `qdrant-client` + `requests` |
 | Sin metadatos estructurados | Soporte para `source` y `tags` |
+| Búsqueda puramente plana | **Sistema de relaciones (Fase 2)** |
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura (Mejorada)
 
 ```
-Texto ──► Ollama (nomic-embed-text) ──► Vector (768 dims)
+Texto ──► Ollama (nomic-embed-text) ──► Vector (768 dims) ──► Qdrant (vectores + metas)
                                               │
                                               ▼
-                                       Qdrant local (vectores + metadatos)
-                                              │
-                                              ▼
-                                       SQLite (texto + metas + tags)
+                                       SQLite (texto + metas + tags + RELACIONES)
 ```
 
-**🔑 Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea **ultrarrápido**. Ahora incluye almacenamiento persistente de **fuente** y **etiquetas** para un filtrado y organización superior.
+**🔑 Clave:** No usamos LLM para generar texto. Solo embeddings. Eso hace que sea **ultrarrápido**. Ahora incluye almacenamiento persistente de **fuente**, **etiquetas** y un **sistema de relaciones** (grafo de conocimiento ligero) que permite conectar memorias de forma direccional y tipada.
 
 ## 🛠️ Stack Tecnológico
 
-CELEBRO no es solo un script; es una orquestación ligera de tres tecnologías fundamentales:
-
-1.  **[Ollama](https://ollama.com/):** Generación de **embeddings** con el modelo `nomic-embed-text`.
-2.  **[Qdrant](https://qdrant.tech/):** Búsqueda vectorial local con soporte para payload enriquecido (`cat`, `source`, `tags`).
-3.  **[SQLite](https://sqlite.org/):** Base relacional para texto, metadatos estructurados y registro histórico.
-
-## 📦 Instalación
-
-### 1. Preparar el entorno (Ollama)
-
-```bash
-ollama pull nomic-embed-text
-```
-
-### 2. Clonar y configurar CELEBRO
-
-```bash
-git clone https://github.com/corcuman/celebro.git
-cd celebro
-
-# Crear entorno virtual e instalar dependencias
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-chmod +x celebro.py
-```
+1.  **[Ollama](https://ollama.com/):** Generación de **embeddings** (`nomic-embed-text`).
+2.  **[Qdrant](https://qdrant.tech/):** Búsqueda vectorial local con payload enriquecido (`cat`, `source`, `tags`).
+3.  **[SQLite](https://sqlite.org/):** Base relacional para datos estructurados y **relaciones (relationships)** entre memorias (`id_src`, `type`, `id_dst`).
 
 ## 🎯 Uso
 
-### CLI (Mejorado)
+### CLI (Mejorado con Relaciones)
 
 ```bash
-# Guardar memoria con categoría, fuente y tags (formato JSON)
-./celebro.py guardar "Agente Smith es OSINT" homelab terminal '["seguridad", "verificado"]'
+# 1. Guardar memoria con metadatos
+./celebro.py guardar "Agente Smith es OSINT" homelab terminal '["seguridad"]'
 
-# Buscar memorias (muestra score y metadatos)
+# 2. Buscar memorias (con filtros opcionales de Qdrant)
 ./celebro.py buscar "Agente Smith" 3
+
+# 3. Crear relaciones entre memorias (Fase 2)
+./celebro.py relacionar <id_origen> "expands_on" <id_destino>
+
+# 4. Listar relaciones de una memoria
+./celebro.py relaciones <id_memoria>
 ```
 
 ### Librería Python
@@ -92,18 +73,17 @@ from celebro import Celebro
 
 cb = Celebro()
 
-# Guardar con metadatos opcionales
-cb.guardar(
-    texto="Usuario prefiere español", 
-    categoria="preferencias", 
-    source="chat_telegram", 
-    tags=["idioma", "personal"]
-)
+# Guardar con metadatos
+id1 = cb.guardar("Usuario prefiere español", categoria="preferencias")
+id2 = cb.guardar("Notificar en español siempre", categoria="protocolos")
 
-# Buscar (devuelve diccionario con texto, score, source y tags)
-resultados = cb.buscar("idioma del usuario", top_k=3)
-for r in resultados:
-    print(f"[{r['score']:.3f}] Source: {r['source']} | Tags: {r['tags']} | {r['texto']}")
+# Crear relación
+cb.add_relation(id2, "follows", id1)
+
+# Consultar relaciones
+relaciones = cb.get_relations(id2)
+for r in relaciones:
+    print(f"[{r['type']}] -> {r['texto'][:50]}...")
 ```
 
 ## 🧪 Tests
@@ -113,12 +93,8 @@ pip install -r tests/requirements-test.txt
 pytest tests/ -v
 ```
 
-## 📄 Licencia
-
-MIT License - ver [LICENSE](LICENSE)
-
 ## 🙏 Créditos
 
 - **Autor:** [@corcuman](https://github.com/corcuman)
-- **Co-creador:** NeoIA (agente local que sufría con Mem0)
+- **Co-creador:** NeoIA
 - **Inspiración:** Hardware humilde que no merecía quedarse sin memoria
