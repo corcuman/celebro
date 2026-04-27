@@ -103,6 +103,17 @@ class Cerebro:
             if must_conditions:
                 filters = Filter(must=must_conditions)
         
+        results = self.qdrant.query_points(
+            collection_name=COLLECTION,
+            query=vector,
+            limit=top_k,
+            query_filter=filters
+        ).points
+        results = self.qdrant.query_points(
+            collection_name=COLLECTION,
+            query=vector,
+            limit=top_k
+        ).points
 
         out = []
         for r in results:

@@ -11,7 +11,7 @@ import sqlite3
 import requests
 import uuid
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, MatchAny
+from qdrant_client.models import Distance, VectorParams, PointStruct
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DB_PATH = "/home/jcorcuera/cerebro_data"
@@ -92,17 +92,11 @@ class Cerebro:
         
         # Por ahora la búsqueda en Qdrant es solo semántica. 
         # Los filtros (source, tags) se podrían implementar aquí con un objeto Filter.
-        filters = None
-        if source or tags:
-            must_conditions = []
-            if source:
-                must_conditions.append(FieldCondition(key="source", match=MatchValue(value=source)))
-            if tags:
-                must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=tags)))
-            
-            if must_conditions:
-                filters = Filter(must=must_conditions)
-        
+        results = self.qdrant.query_points(
+            collection_name=COLLECTION,
+            query=vector,
+            limit=top_k
+        ).points
 
         out = []
         for r in results:
